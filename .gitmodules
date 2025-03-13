@@ -1,0 +1,6 @@
+[submodule "vip"]
+	path = vip
+	url = https://github.com/facebookresearch/vip.git
+[submodule "LIV"]
+	path = LIV
+	url = https://github.com/penn-pal-lab/LIV.git
