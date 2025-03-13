@@ -613,7 +613,7 @@ def decomp_trajectories(
 DEFAULT_DECOMP_KWARGS = dict(
     embed=dict(
         normalize_curve=False,
-        min_interval=18,
+        min_interval=5,
         smooth_method="kernel",
         gamma=0.08,
     ),
