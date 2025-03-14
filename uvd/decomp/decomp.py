@@ -326,16 +326,115 @@ def get_hybrid_milestones(
     return hybrid_milestones
 
 
+# def embedding_decomp(
+#     embeddings: np.ndarray | torch.Tensor,
+#     normalize_curve: bool = True,
+#     min_interval: int = 18,
+#     window_length: int | None = None,
+#     smooth_method: Literal["kernel", "savgol"] = "kernel",
+#     extrema_comparator: Callable = np.greater,
+#     fill_embeddings: bool = True,
+#     return_intermediate_curves: bool = False,
+#     **kwargs,
+# ) -> tuple[torch.Tensor | np.ndarray, DecompMeta]:
+#     if torch.is_tensor(embeddings):
+#         device = embeddings.device
+#         embeddings = U.any_to_numpy(embeddings)
+#     else:
+#         device = None
+#     # L, N
+#     assert embeddings.ndim == 2, embeddings.shape
+#     traj_length = embeddings.shape[0]
+#
+#     cur_goal_idx = traj_length - 1
+#     goal_indices = [cur_goal_idx]
+#     cur_embeddings = embeddings[
+#         max(0, cur_goal_idx - (window_length or cur_goal_idx)) : cur_goal_idx + 1
+#     ]
+#     iterate_num = 0
+#     iter_curves = [] if return_intermediate_curves else None
+#     while cur_goal_idx > (window_length or min_interval):
+#         iterate_num += 1
+#         # get goal embedding
+#         goal_embedding = cur_embeddings[-1]
+#         distances = np.linalg.norm(cur_embeddings - goal_embedding, axis=1)
+#         if normalize_curve:
+#             distances = distances / np.linalg.norm(cur_embeddings[0] - goal_embedding)
+#
+#         x = np.arange(
+#             max(0, cur_goal_idx - (window_length or cur_goal_idx)), cur_goal_idx + 1
+#         )
+#
+#         if smooth_method == "kernel":
+#             smooth_kwargs = dict(kernel="rbf", gamma=0.08)
+#             smooth_kwargs.update(kwargs or {})
+#             kr = KernelRegression(**smooth_kwargs)
+#             kr.fit(x.reshape(-1, 1), distances)
+#             distance_smoothed = kr.predict(x.reshape(-1, 1))
+#         elif smooth_method == "savgol":
+#             smooth_kwargs = dict(window_length=85, polyorder=2, mode="nearest")
+#             smooth_kwargs.update(kwargs or {})
+#             distance_smoothed = savgol_filter(distances, **smooth_kwargs)
+#         elif smooth_method is None:
+#             distance_smoothed = distances
+#         else:
+#             raise NotImplementedError(smooth_method)
+#
+#         if iter_curves is not None:
+#             iter_curves.append(distance_smoothed)
+#
+#         extrema_indices = argrelextrema(distance_smoothed, extrema_comparator)[0]
+#         x_extrema = x[extrema_indices]
+#
+#         update_goal = False
+#         for i in range(len(x_extrema) - 1, -1, -1):
+#             if cur_goal_idx < min_interval:
+#                 break
+#             if (
+#                 cur_goal_idx - x_extrema[i] > min_interval
+#                 and x_extrema[i] > min_interval
+#             ):
+#                 cur_goal_idx = x_extrema[i]
+#                 update_goal = True
+#                 goal_indices.append(cur_goal_idx)
+#                 break
+#
+#         if not update_goal or cur_goal_idx < min_interval:
+#             break
+#         cur_embeddings = embeddings[
+#             max(0, cur_goal_idx - (window_length or cur_goal_idx)) : cur_goal_idx + 1
+#         ]
+#
+#     goal_indices = goal_indices[::-1]
+#     if fill_embeddings:
+#         milestone_embeddings = np.concatenate(
+#             [embeddings[goal_indices[0], ...][None]]
+#             + [
+#                 np.full((end - start, *embeddings.shape[1:]), embeddings[end, ...])
+#                 for start, end in zip([0] + goal_indices[:-1], goal_indices)
+#             ],
+#         )
+#         if device is not None:
+#             milestone_embeddings = U.any_to_torch_tensor(
+#                 milestone_embeddings, device=device
+#             )
+#     else:
+#         milestone_embeddings = None
+#     return milestone_embeddings, DecompMeta(
+#         milestone_indices=goal_indices, iter_curves=iter_curves
+#     )
+
 def embedding_decomp(
-    embeddings: np.ndarray | torch.Tensor,
-    normalize_curve: bool = True,
-    min_interval: int = 18,
-    window_length: int | None = None,
-    smooth_method: Literal["kernel", "savgol"] = "kernel",
-    extrema_comparator: Callable = np.greater,
-    fill_embeddings: bool = True,
-    return_intermediate_curves: bool = False,
-    **kwargs,
+        embeddings: np.ndarray | torch.Tensor,
+        normalize_curve: bool = True,
+        min_interval: int = 18,
+        window_length: int | None = None,
+        smooth_method: Literal["kernel", "savgol"] = "kernel",
+        extrema_comparator: Callable = np.greater,
+        fill_embeddings: bool = True,
+        return_intermediate_curves: bool = False,
+        subgoal_target: int | None = None,
+        **kwargs,
 ) -> tuple[torch.Tensor | np.ndarray, DecompMeta]:
     if torch.is_tensor(embeddings):
         device = embeddings.device
@@ -345,14 +444,16 @@ def embedding_decomp(
     # L, N
     assert embeddings.ndim == 2, embeddings.shape
     traj_length = embeddings.shape[0]
-
     cur_goal_idx = traj_length - 1
     goal_indices = [cur_goal_idx]
     cur_embeddings = embeddings[
-        max(0, cur_goal_idx - (window_length or cur_goal_idx)) : cur_goal_idx + 1
-    ]
+                     max(0, cur_goal_idx - (window_length or cur_goal_idx)): cur_goal_idx + 1
+                     ]
     iterate_num = 0
     iter_curves = [] if return_intermediate_curves else None
+    # Dictionary to store extrema sharpness for later filtering
+    extrema_sharpness = {}
+
     while cur_goal_idx > (window_length or min_interval):
         iterate_num += 1
         # get goal embedding
@@ -360,11 +461,9 @@ def embedding_decomp(
         distances = np.linalg.norm(cur_embeddings - goal_embedding, axis=1)
         if normalize_curve:
             distances = distances / np.linalg.norm(cur_embeddings[0] - goal_embedding)
-
         x = np.arange(
             max(0, cur_goal_idx - (window_length or cur_goal_idx)), cur_goal_idx + 1
         )
-
         if smooth_method == "kernel":
             smooth_kwargs = dict(kernel="rbf", gamma=0.08)
             smooth_kwargs.update(kwargs or {})
@@ -379,33 +478,77 @@ def embedding_decomp(
             distance_smoothed = distances
         else:
             raise NotImplementedError(smooth_method)
-
         if iter_curves is not None:
             iter_curves.append(distance_smoothed)
-
         extrema_indices = argrelextrema(distance_smoothed, extrema_comparator)[0]
-        x_extrema = x[extrema_indices]
 
+        # Calculate sharpness for each extrema
+        for idx in extrema_indices:
+            actual_idx = x[idx]
+            # Calculate sharpness using second derivative magnitude
+            if idx > 0 and idx < len(distance_smoothed) - 1:
+                # Second derivative approximation
+                second_deriv = (
+                        distance_smoothed[idx + 1]
+                        - 2 * distance_smoothed[idx]
+                        + distance_smoothed[idx - 1]
+                )
+                sharpness = abs(second_deriv)
+                # Store the sharpness value with the actual index
+                extrema_sharpness[actual_idx] = sharpness
+
+        # Calculate sharpness for each extrema using a combined approach
+        x_extrema = x[extrema_indices]
         update_goal = False
         for i in range(len(x_extrema) - 1, -1, -1):
             if cur_goal_idx < min_interval:
                 break
             if (
-                cur_goal_idx - x_extrema[i] > min_interval
-                and x_extrema[i] > min_interval
+                    cur_goal_idx - x_extrema[i] > min_interval
+                    and x_extrema[i] > min_interval
             ):
                 cur_goal_idx = x_extrema[i]
                 update_goal = True
                 goal_indices.append(cur_goal_idx)
                 break
-
         if not update_goal or cur_goal_idx < min_interval:
             break
         cur_embeddings = embeddings[
-            max(0, cur_goal_idx - (window_length or cur_goal_idx)) : cur_goal_idx + 1
-        ]
+                         max(0, cur_goal_idx - (window_length or cur_goal_idx)): cur_goal_idx + 1
+                         ]
 
     goal_indices = goal_indices[::-1]
+    for i in goal_indices[:-1]:
+        print(extrema_sharpness[i])
+
+    # Filter indices based on subgoal_target if provided
+    if subgoal_target is not None and len(goal_indices) > subgoal_target:
+        # Always keep the last index (end point)
+        if subgoal_target >= 1:
+            # Get all indices except the last one, with their sharpness
+            candidate_indices = goal_indices[:-1]
+            indices_with_sharpness = [
+                (idx, extrema_sharpness.get(idx, 0)) for idx in candidate_indices
+            ]
+
+            # Sort by sharpness (higher values first)
+            sorted_indices = [
+                idx for idx, _ in sorted(
+                    indices_with_sharpness,
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+            ]
+
+            # Take top (subgoal_target-1) indices by sharpness
+            top_indices = sorted_indices[:subgoal_target - 1]
+
+            # Add the last index and sort to maintain chronological order
+            filtered_indices = top_indices + [goal_indices[-1]]
+            goal_indices = sorted(filtered_indices)
+        else:
+            # If subgoal_target is 0, just keep the last index
+            goal_indices = [goal_indices[-1]]
     if fill_embeddings:
         milestone_embeddings = np.concatenate(
             [embeddings[goal_indices[0], ...][None]]
@@ -420,6 +563,7 @@ def embedding_decomp(
             )
     else:
         milestone_embeddings = None
+
     return milestone_embeddings, DecompMeta(
         milestone_indices=goal_indices, iter_curves=iter_curves
     )
@@ -613,9 +757,12 @@ def decomp_trajectories(
 DEFAULT_DECOMP_KWARGS = dict(
     embed=dict(
         normalize_curve=False,
-        min_interval=5,
+        # min_interval=5,
+        min_interval=1,
         smooth_method="kernel",
         gamma=0.08,
+        # gamma=0.04,
+        subgoal_target=4,
     ),
     embed_no_robot=dict(
         window_length=8,
