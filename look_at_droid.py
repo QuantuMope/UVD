@@ -31,7 +31,7 @@ ds = tfds.load("droid_100", data_dir="/home/asjchoi/Downloads/droid", split="tra
 
 # Collect images from a random episode
 images = []
-for episode in ds.shuffle(10, seed=0).take(1):
+for episode in ds.shuffle(98, seed=0).take(1):
     for i, step in enumerate(episode["steps"]):
         images.append(
             Image.fromarray(

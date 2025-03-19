@@ -424,7 +424,353 @@ def get_hybrid_milestones(
 #         milestone_indices=goal_indices, iter_curves=iter_curves
 #     )
 
+def first_derivative(curve):
+    """
+    Calculate the first derivative of a curve using central differences.
+
+    Args:
+        curve: Array of y-values of the curve
+
+    Returns:
+        Array of first derivatives (same length as input)
+    """
+    # Initialize derivative array with same length as input
+    derivative = np.zeros_like(curve)
+
+    # Use central differences for interior points
+    for i in range(1, len(curve) - 1):
+        derivative[i] = (curve[i + 1] - curve[i - 1]) / 2
+
+    # Forward difference for first point
+    derivative[0] = curve[1] - curve[0]
+
+    # Backward difference for last point
+    derivative[-1] = curve[-1] - curve[-2]
+
+    return derivative
+
 def embedding_decomp(
+        embeddings: np.ndarray | torch.Tensor,
+        normalize_curve: bool = True,
+        min_interval: int = 18,
+        window_length: int | None = None,
+        smooth_method: Literal["kernel", "savgol"] = "kernel",
+        extrema_comparator: Callable = np.greater,
+        fill_embeddings: bool = True,
+        return_intermediate_curves: bool = False,
+        subgoal_target: int | None = None,
+        orig_method: bool = False,
+        **kwargs):
+    if orig_method:
+        return embedding_decomp_orig(
+            embeddings, normalize_curve, min_interval, window_length, smooth_method,
+            extrema_comparator, fill_embeddings, return_intermediate_curves, subgoal_target,
+            **kwargs
+        )
+    else:
+        return embedding_decomp_custom(
+            embeddings, normalize_curve, min_interval, window_length, smooth_method,
+            extrema_comparator, fill_embeddings, return_intermediate_curves, subgoal_target,
+            **kwargs)
+
+def embedding_decomp_orig(
+        embeddings: np.ndarray | torch.Tensor,
+        normalize_curve: bool = True,
+        min_interval: int = 18,
+        window_length: int | None = None,
+        smooth_method: Literal["kernel", "savgol"] = "kernel",
+        extrema_comparator: Callable = np.greater,
+        fill_embeddings: bool = True,
+        return_intermediate_curves: bool = False,
+        subgoal_target: int | None = None,
+        **kwargs,
+) -> tuple[torch.Tensor | np.ndarray, DecompMeta]:
+    if torch.is_tensor(embeddings):
+        device = embeddings.device
+        embeddings = U.any_to_numpy(embeddings)
+    else:
+        device = None
+    # L, N
+    assert embeddings.ndim == 2, embeddings.shape
+    traj_length = embeddings.shape[0]
+    cur_goal_idx = traj_length - 1
+    goal_indices = [cur_goal_idx]
+    cur_embeddings = embeddings[
+                     max(0, cur_goal_idx - (window_length or cur_goal_idx)): cur_goal_idx + 1
+                     ]
+    iterate_num = 0
+    iter_curves = [] if return_intermediate_curves else None
+    # Dictionary to store extrema sharpness for later filtering
+    extrema_sharpness = {}
+
+
+
+    while cur_goal_idx > (window_length or min_interval):
+        iterate_num += 1
+        # get goal embedding
+        goal_embedding = cur_embeddings[-1]
+        distances = np.linalg.norm(cur_embeddings - goal_embedding, axis=1)
+        if normalize_curve:
+            distances = distances / np.linalg.norm(cur_embeddings[0] - goal_embedding)
+        x = np.arange(
+            max(0, cur_goal_idx - (window_length or cur_goal_idx)), cur_goal_idx + 1
+        )
+        if smooth_method == "kernel":
+            smooth_kwargs = dict(kernel="rbf", gamma=0.08)
+            smooth_kwargs.update(kwargs or {})
+            kr = KernelRegression(**smooth_kwargs)
+            kr.fit(x.reshape(-1, 1), distances)
+            distance_smoothed = kr.predict(x.reshape(-1, 1))
+        elif smooth_method == "savgol":
+            smooth_kwargs = dict(window_length=85, polyorder=2, mode="nearest")
+            smooth_kwargs.update(kwargs or {})
+            distance_smoothed = savgol_filter(distances, **smooth_kwargs)
+        elif smooth_method is None:
+            distance_smoothed = distances
+        else:
+            raise NotImplementedError(smooth_method)
+        if iter_curves is not None:
+            iter_curves.append(distance_smoothed)
+
+        # deriv = first_derivative(distance_smoothed)
+        # deriv_2nd = first_derivative(deriv)
+
+        # extrema_indices = argrelextrema(distance_smoothed, np.greater)[0]
+
+        maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
+        minima_indices = argrelextrema(distance_smoothed, np.less)[0]
+        extrema_indices = np.union1d(maxima_indices, minima_indices)
+        #
+        # extrema_indices = merge_nearby_extrema(extrema_indices, distance_threshold=5)
+
+
+        plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
+        for idx in extrema_indices:
+            plt.axvline(x=idx, color='r')
+        plt.show()
+
+        # Calculate sharpness for each extrema
+        for idx in extrema_indices:
+            actual_idx = x[idx]
+            y_dist = calculate_y_distance(distance_smoothed, idx, extrema_indices)
+            extrema_sharpness[actual_idx] = y_dist
+            print(y_dist)
+
+            # # Calculate sharpness using second derivative magnitude
+            # if idx > 0 and idx < len(distance_smoothed) - 1:
+            #     # Second derivative approximation
+            #     second_deriv = (
+            #             distance_smoothed[idx + 1]
+            #             - 2 * distance_smoothed[idx]
+            #             + distance_smoothed[idx - 1]
+            #     )
+            #     sharpness = abs(second_deriv)
+            #     # Store the sharpness value with the actual index
+            #     extrema_sharpness[actual_idx] = sharpness
+            #     print(sharpness)
+
+        # Calculate sharpness for each extrema using a combined approach
+        x_extrema = x[extrema_indices]
+        update_goal = False
+        for i in range(len(x_extrema) - 1, -1, -1):
+            if cur_goal_idx < min_interval:
+                break
+            if (
+                    cur_goal_idx - x_extrema[i] > min_interval
+                    and x_extrema[i] > min_interval
+            ):
+                cur_goal_idx = x_extrema[i]
+                update_goal = True
+                goal_indices.append(cur_goal_idx)
+                break
+        if not update_goal or cur_goal_idx < min_interval:
+            break
+        cur_embeddings = embeddings[
+                         max(0, cur_goal_idx - (window_length or cur_goal_idx)): cur_goal_idx + 1
+                         ]
+
+    goal_indices = goal_indices[::-1]
+    for i in goal_indices[:-1]:
+        print(extrema_sharpness[i])
+
+    print(extrema_sharpness)
+
+    # Filter indices based on subgoal_target if provided
+    if subgoal_target is not None and len(goal_indices) > subgoal_target:
+        # Always keep the last index (end point)
+        if subgoal_target >= 1:
+            # Get all indices except the last one, with their sharpness
+            candidate_indices = goal_indices[:-1]
+            indices_with_sharpness = [
+                (idx, extrema_sharpness.get(idx, 0)) for idx in candidate_indices
+            ]
+
+            # Sort by sharpness (higher values first)
+            sorted_indices = [
+                idx for idx, _ in sorted(
+                    indices_with_sharpness,
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+            ]
+
+            # Take top (subgoal_target-1) indices by sharpness
+            top_indices = sorted_indices[:subgoal_target - 1]
+
+            # Add the last index and sort to maintain chronological order
+            filtered_indices = top_indices + [goal_indices[-1]]
+            goal_indices = sorted(filtered_indices)
+        else:
+            # If subgoal_target is 0, just keep the last index
+            goal_indices = [goal_indices[-1]]
+    if fill_embeddings:
+        milestone_embeddings = np.concatenate(
+            [embeddings[goal_indices[0], ...][None]]
+            + [
+                np.full((end - start, *embeddings.shape[1:]), embeddings[end, ...])
+                for start, end in zip([0] + goal_indices[:-1], goal_indices)
+            ],
+        )
+        if device is not None:
+            milestone_embeddings = U.any_to_torch_tensor(
+                milestone_embeddings, device=device
+            )
+    else:
+        milestone_embeddings = None
+
+    return milestone_embeddings, DecompMeta(
+        milestone_indices=goal_indices, iter_curves=iter_curves
+    )
+
+
+def calculate_prominence(curve, idx, is_maxima):
+    """Calculate prominence with better boundary handling"""
+    val = curve[idx]
+
+    # Skip extrema that are at the very edges
+    if idx == 0 or idx == len(curve) - 1:
+        return 0
+
+    if is_maxima:  # For peaks
+        # Find key points: all higher peaks to left and right
+        higher_left = [i for i in range(0, idx) if curve[i] > val]
+        higher_right = [i for i in range(idx + 1, len(curve)) if curve[i] > val]
+
+        # If no higher peaks on either side, use curve endpoints
+        left_ref = max(higher_left) if higher_left else 0
+        right_ref = min(higher_right) if higher_right else len(curve) - 1
+
+        # Find lowest point between peak and references
+        left_min = np.min(curve[left_ref:idx + 1])
+        right_min = np.min(curve[idx:right_ref + 1])
+
+        # Prominence is minimum height above saddle points
+        return val - max(left_min, right_min)
+    else:  # For valleys
+        # Find key points: all lower valleys to left and right
+        lower_left = [i for i in range(0, idx) if curve[i] < val]
+        lower_right = [i for i in range(idx + 1, len(curve)) if curve[i] < val]
+
+        # If no lower valleys on either side, use curve endpoints
+        left_ref = max(lower_left) if lower_left else 0
+        right_ref = min(lower_right) if lower_right else len(curve) - 1
+
+        # Find highest point between valley and references
+        left_max = np.max(curve[left_ref:idx + 1])
+        right_max = np.max(curve[idx:right_ref + 1])
+
+        # Prominence is minimum depth below saddle points
+        return min(left_max, right_max) - val
+
+
+def calculate_y_distance(curve, idx, extrema_indices):
+    """
+    Calculate the significance of an extrema based on y-distance to neighboring extrema.
+    For edge extrema, uses the curve boundaries.
+
+    Args:
+        curve: The smoothed distance curve (y values)
+        idx: Index of the extrema in the curve
+        extrema_indices: Array of all extrema indices
+
+    Returns:
+        A value representing the significance based on y-distance change
+    """
+    val = curve[idx]
+    curve_length = len(curve)
+
+    # Find the indices of neighboring extrema
+    extrema_positions = np.where(extrema_indices == idx)[0][0]  # Find position in extrema_indices array
+
+    # Find left neighbor (previous extrema or curve start)
+    if extrema_positions > 0:
+        left_extrema_idx = extrema_indices[extrema_positions - 1]
+        left_val = curve[left_extrema_idx]
+    else:
+        # If this is the leftmost extrema, use the start of the curve
+        left_extrema_idx = 0
+        left_val = curve[0]
+
+    # Find right neighbor (next extrema or curve end)
+    if extrema_positions < len(extrema_indices) - 1:
+        right_extrema_idx = extrema_indices[extrema_positions + 1]
+        right_val = curve[right_extrema_idx]
+    else:
+        # If this is the rightmost extrema, use the end of the curve
+        right_extrema_idx = curve_length - 1
+        right_val = curve[-1]
+
+    # Calculate y-distance changes
+    left_distance = abs(val - left_val)
+    right_distance = abs(val - right_val)
+    # left_slope = abs((val - left_val) / (idx - left_extrema_idx ))
+    # right_slope = abs((val - right_val) / (right_extrema_idx - idx))
+
+    # Combine distances - you can adjust this formula based on your preference
+    # Here we take the average of both distances
+    y_distance_score = (left_distance + right_distance) / 2
+    # y_slope_score = (left_slope + right_slope) / 2
+    # y_slope_score = min(left_slope, right_slope)
+
+    # Alternative: use the minimum distance to be conservative
+    # y_distance_score = min(left_distance, right_distance)
+
+    # Another alternative: use the maximum distance to emphasize large changes
+    # y_distance_score = max(left_distance, right_distance)
+
+    return y_distance_score
+    # return y_slope_score
+
+
+def merge_nearby_extrema(extrema_indices, distance_threshold=5):
+    """
+    Merge extrema indices that are within a certain distance threshold.
+    """
+    if len(extrema_indices) <= 1:
+        return extrema_indices
+
+    # Sort the indices first
+    sorted_indices = np.sort(extrema_indices)
+
+    # List to store merged indices
+    merged = []
+    i = 0
+
+    while i < len(sorted_indices):
+        # Add current index
+        current = sorted_indices[i]
+        merged.append(current)
+
+        # Skip any following indices that are too close
+        while i + 1 < len(sorted_indices) and sorted_indices[i + 1] - current <= distance_threshold:
+            i += 1
+
+        i += 1
+
+    return np.array(merged)
+
+
+def embedding_decomp_custom(
         embeddings: np.ndarray | torch.Tensor,
         normalize_curve: bool = True,
         min_interval: int = 18,
@@ -482,20 +828,74 @@ def embedding_decomp(
             iter_curves.append(distance_smoothed)
         extrema_indices = argrelextrema(distance_smoothed, extrema_comparator)[0]
 
+        # maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
+        # minima_indices = argrelextrema(distance_smoothed, np.less)[0]
+        # extrema_indices = np.union1d(maxima_indices, minima_indices)
+        # extrema_indices = merge_nearby_extrema(extrema_indices, distance_threshold=5)
+
+        print(len(extrema_indices))
+        plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
+        # for idx in maxima_indices:
+        #     plt.axvline(x=idx, color='r')
+        # for idx in minima_indices:
+        #     plt.axvline(x=idx, color='g')
+        for idx in extrema_indices:
+            plt.axvline(x=idx, color='g')
+        plt.show()
+
+        def better_second_deriv(curve, idx, window=3):
+            """Calculate second derivative using a wider window"""
+            h = 1  # Assuming uniform spacing
+            weights = np.array([1, -2, 1])  # Basic second derivative kernel
+
+            # For wider windows, we need to extend this kernel
+            if window > 1:
+                # Create a wider kernel for smoother approximation
+                extended = np.zeros(2 * window + 1)
+                extended[window - 1:window + 2] = weights
+                weights = extended
+
+            # Apply the kernel around idx
+            start = max(0, idx - window)
+            end = min(len(curve), idx + window + 1)
+            kernel_start = max(0, window - idx)
+            kernel_end = kernel_start + (end - start)
+
+            # Compute the weighted sum
+            return np.sum(curve[start:end] * weights[kernel_start:kernel_end]) / (h * h)
+
         # Calculate sharpness for each extrema
         for idx in extrema_indices:
             actual_idx = x[idx]
             # Calculate sharpness using second derivative magnitude
-            if idx > 0 and idx < len(distance_smoothed) - 1:
-                # Second derivative approximation
-                second_deriv = (
-                        distance_smoothed[idx + 1]
-                        - 2 * distance_smoothed[idx]
-                        + distance_smoothed[idx - 1]
-                )
-                sharpness = abs(second_deriv)
-                # Store the sharpness value with the actual index
-                extrema_sharpness[actual_idx] = sharpness
+
+            # is_maxima = idx in maxima_indices
+            # prom = calculate_prominence(distance_smoothed, idx, is_maxima)
+            # extrema_sharpness[actual_idx] = prom
+
+            y_dist = calculate_y_distance(distance_smoothed, idx, extrema_indices)
+            extrema_sharpness[actual_idx] = y_dist
+
+            # if idx > 0 and idx < len(distance_smoothed) - 1:
+            #     second_deriv = better_second_deriv(distance_smoothed, idx, window=5)
+            #     # Second derivative approximation
+            #     # second_deriv = (
+            #     #         distance_smoothed[idx + 1]
+            #     #         - 2 * distance_smoothed[idx]
+            #     #         + distance_smoothed[idx - 1]
+            #     # )
+            #     sharpness = abs(second_deriv)
+            #     # Store the sharpness value with the actual index
+            #     extrema_sharpness[actual_idx] = sharpness
+            #     print(sharpness)
+
+        # goal_indices = extrema_indices[::-1]
+
+        goal_indices = list(extrema_indices)
+        goal_indices.append(len(x)-1)
+        goal_indices = np.array(goal_indices, dtype=int)[::-1]
+        extrema_sharpness[len(x)-1] = 0
+        break
 
         # Calculate sharpness for each extrema using a combined approach
         x_extrema = x[extrema_indices]
@@ -518,8 +918,10 @@ def embedding_decomp(
                          ]
 
     goal_indices = goal_indices[::-1]
+    print(goal_indices)
     for i in goal_indices[:-1]:
         print(extrema_sharpness[i])
+
 
     # Filter indices based on subgoal_target if provided
     if subgoal_target is not None and len(goal_indices) > subgoal_target:
@@ -556,7 +958,7 @@ def embedding_decomp(
                 np.full((end - start, *embeddings.shape[1:]), embeddings[end, ...])
                 for start, end in zip([0] + goal_indices[:-1], goal_indices)
             ],
-        )
+            )
         if device is not None:
             milestone_embeddings = U.any_to_torch_tensor(
                 milestone_embeddings, device=device
@@ -760,9 +1162,8 @@ DEFAULT_DECOMP_KWARGS = dict(
         # min_interval=5,
         min_interval=1,
         smooth_method="kernel",
-        gamma=0.08,
-        # gamma=0.04,
-        subgoal_target=4,
+        gamma=0.04,
+        subgoal_target=None,
     ),
     embed_no_robot=dict(
         window_length=8,
