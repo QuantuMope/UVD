@@ -30,8 +30,8 @@ def as_mp4(images, path="output.mp4", fps=15):
 ds = tfds.load("droid_100", data_dir="/home/asjchoi/Downloads/droid", split="train")
 
 # Collect images from a random episode
-images = []
-for episode in ds.shuffle(98, seed=0).take(1):
+for e, episode in enumerate(ds.shuffle(87, seed=0).take(50)):
+    images = []
     for i, step in enumerate(episode["steps"]):
         images.append(
             Image.fromarray(
@@ -42,10 +42,9 @@ for episode in ds.shuffle(98, seed=0).take(1):
                 ), axis=1)
             )
         )
-
 # Generate MP4 file
-output_path = as_mp4(images, "droid_visualization.mp4")
-print(f"MP4 video created at: {os.path.abspath(output_path)}")
+    output_path = as_mp4(images, f"/home/asjchoi/Downloads/droid/droid_100/droid{e}.mp4")
+    print(f"MP4 video created at: {os.path.abspath(output_path)}")
 
 # If you're in a notebook and want to display the video:
 # from IPython.display import Video

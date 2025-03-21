@@ -504,7 +504,6 @@ def embedding_decomp_orig(
     extrema_sharpness = {}
 
 
-
     while cur_goal_idx > (window_length or min_interval):
         iterate_num += 1
         # get goal embedding
@@ -532,22 +531,19 @@ def embedding_decomp_orig(
         if iter_curves is not None:
             iter_curves.append(distance_smoothed)
 
-        # deriv = first_derivative(distance_smoothed)
-        # deriv_2nd = first_derivative(deriv)
+        extrema_indices = argrelextrema(distance_smoothed, np.greater)[0]
 
-        # extrema_indices = argrelextrema(distance_smoothed, np.greater)[0]
-
-        maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
-        minima_indices = argrelextrema(distance_smoothed, np.less)[0]
-        extrema_indices = np.union1d(maxima_indices, minima_indices)
+        # maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
+        # minima_indices = argrelextrema(distance_smoothed, np.less)[0]
+        # extrema_indices = np.union1d(maxima_indices, minima_indices)
         #
-        # extrema_indices = merge_nearby_extrema(extrema_indices, distance_threshold=5)
+        # extrema_indices = merge_nearby_extrema(extrema_indices, distance_threshold=15)
 
-
-        plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
-        for idx in extrema_indices:
-            plt.axvline(x=idx, color='r')
-        plt.show()
+        # plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
+        # for idx in extrema_indices:
+        #     plt.axvline(x=idx, color='r')
+        # plt.show()
+        # exit(0)
 
         # Calculate sharpness for each extrema
         for idx in extrema_indices:
@@ -590,10 +586,8 @@ def embedding_decomp_orig(
                          ]
 
     goal_indices = goal_indices[::-1]
-    for i in goal_indices[:-1]:
-        print(extrema_sharpness[i])
-
-    print(extrema_sharpness)
+    # for i in goal_indices[:-1]:
+    #     print(extrema_sharpness[i])
 
     # Filter indices based on subgoal_target if provided
     if subgoal_target is not None and len(goal_indices) > subgoal_target:
@@ -728,9 +722,14 @@ def calculate_y_distance(curve, idx, extrema_indices):
 
     # Combine distances - you can adjust this formula based on your preference
     # Here we take the average of both distances
-    y_distance_score = (left_distance + right_distance) / 2
-    # y_slope_score = (left_slope + right_slope) / 2
-    # y_slope_score = min(left_slope, right_slope)
+    # y_distance_score = (left_distance + right_distance) / 2
+    if left_distance < 0.05 or right_distance < 0.05:
+        y_distance_score = 0
+    else:
+        # y_distance_score = min(left_distance, right_distance)
+        y_distance_score = left_distance + right_distance
+    y_distance_score = left_distance + right_distance
+    # y_distance_score = min(left_distance, right_distance)
 
     # Alternative: use the minimum distance to be conservative
     # y_distance_score = min(left_distance, right_distance)
@@ -826,22 +825,20 @@ def embedding_decomp_custom(
             raise NotImplementedError(smooth_method)
         if iter_curves is not None:
             iter_curves.append(distance_smoothed)
-        extrema_indices = argrelextrema(distance_smoothed, extrema_comparator)[0]
 
-        # maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
-        # minima_indices = argrelextrema(distance_smoothed, np.less)[0]
-        # extrema_indices = np.union1d(maxima_indices, minima_indices)
+        # extrema_indices = argrelextrema(distance_smoothed, extrema_comparator)[0]
+
+        maxima_indices = argrelextrema(distance_smoothed, np.greater)[0]
+        minima_indices = argrelextrema(distance_smoothed, np.less)[0]
+        extrema_indices = np.union1d(maxima_indices, minima_indices)
         # extrema_indices = merge_nearby_extrema(extrema_indices, distance_threshold=5)
 
-        print(len(extrema_indices))
-        plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
+        # plt.plot(np.arange(len(distance_smoothed)), distance_smoothed)
         # for idx in maxima_indices:
         #     plt.axvline(x=idx, color='r')
         # for idx in minima_indices:
         #     plt.axvline(x=idx, color='g')
-        for idx in extrema_indices:
-            plt.axvline(x=idx, color='g')
-        plt.show()
+        # plt.show()
 
         def better_second_deriv(curve, idx, window=3):
             """Calculate second derivative using a wider window"""
@@ -1158,11 +1155,11 @@ def decomp_trajectories(
 
 DEFAULT_DECOMP_KWARGS = dict(
     embed=dict(
-        normalize_curve=False,
+        normalize_curve=True,
         # min_interval=5,
         min_interval=1,
         smooth_method="kernel",
-        gamma=0.04,
+        gamma=0.01,
         subgoal_target=None,
     ),
     embed_no_robot=dict(
