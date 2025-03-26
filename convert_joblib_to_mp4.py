@@ -39,21 +39,29 @@ def save_video_from_arrays(arrays, output_path, fps=30, codec='mp4v'):
     print(f"Video saved to {output_path}")
 
 
-for i in range(1, 9):
-    # data = joblib.load(f"/home/asjchoi/datasets/openx/bridge/test/episode_{i}.joblib.gz")
-    data = joblib.load(f"/home/asjchoi/Downloads/droid/episode_{i}.joblib.gz")
+for i in range(1, 24):
+    data = joblib.load(f"/home/asjchoi/datasets/openx/droid/episode_{i}.joblib.gz")
+    # data = joblib.load(f"/home/asjchoi/Downloads/droid/episode_{i}.joblib.gz")
 
-    np_arrs = []
+    frames = []
+    actions = []
+    language = data['steps'][0]['language_instruction']
     for time_step in data['steps']:
-        print(time_step['language_instruction'])
         # img = time_step['observation']['image_0']
         img = time_step['observation']['image']
-        np_arrs.append(img)
+        actions.append(time_step['action'])
+        frames.append(img)
 
     # cv2.imshow("img", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
     # cv2.waitKey(0)
 
-    # save_video_from_arrays(np_arrs, f"/home/asjchoi/Desktop/uvd_videos/bridge{i}.mp4", fps=5)
-    save_video_from_arrays(np_arrs, f"/home/asjchoi/Downloads/droid/droid{i}.mp4", fps=5)
+    frames = np.array(frames)
+    actions = np.array(actions)
+
+    np.savez(f"/home/asjchoi/datasets/openx/droid/droid{i}.npz", frames=frames, actions=actions, language=language)
+
+    save_video_from_arrays(frames, f"/home/asjchoi/datasets/openx/droid/droid{i}.mp4", fps=5)
+
+
 
 

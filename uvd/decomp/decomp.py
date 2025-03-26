@@ -546,24 +546,26 @@ def embedding_decomp_orig(
         # exit(0)
 
         # Calculate sharpness for each extrema
-        for idx in extrema_indices:
+        extrema_indices = list(extrema_indices)
+        x = list(x)
+        for idx in extrema_indices[:]:
+
+            from_stationary = check_if_adjacent_to_stationary(distance_smoothed, idx, extrema_indices)
+            if from_stationary:
+                extrema_indices.remove(idx)
+                del x[idx]
+                continue
+
             actual_idx = x[idx]
             y_dist = calculate_y_distance(distance_smoothed, idx, extrema_indices)
             extrema_sharpness[actual_idx] = y_dist
             print(y_dist)
 
-            # # Calculate sharpness using second derivative magnitude
-            # if idx > 0 and idx < len(distance_smoothed) - 1:
-            #     # Second derivative approximation
-            #     second_deriv = (
-            #             distance_smoothed[idx + 1]
-            #             - 2 * distance_smoothed[idx]
-            #             + distance_smoothed[idx - 1]
-            #     )
-            #     sharpness = abs(second_deriv)
-            #     # Store the sharpness value with the actual index
-            #     extrema_sharpness[actual_idx] = sharpness
-            #     print(sharpness)
+        extrema_indices = np.array(extrema_indices)
+        x = np.array(x)
+
+        if len(extrema_indices) == 0:
+            break
 
         # Calculate sharpness for each extrema using a combined approach
         x_extrema = x[extrema_indices]
@@ -675,6 +677,53 @@ def calculate_prominence(curve, idx, is_maxima):
 
         # Prominence is minimum depth below saddle points
         return min(left_max, right_max) - val
+
+
+def check_if_adjacent_to_stationary(curve, idx, extrema_indices,
+                                    threshold: float = 0.00):
+    """
+    Calculate the significance of an extrema based on y-distance to neighboring extrema.
+    For edge extrema, uses the curve boundaries.
+
+    Args:
+        curve: The smoothed distance curve (y values)
+        idx: Index of the extrema in the curve
+        extrema_indices: Array of all extrema indices
+
+    Returns:
+        A value representing the significance based on y-distance change
+    """
+    val = curve[idx]
+    curve_length = len(curve)
+
+    # Find the indices of neighboring extrema
+    extrema_positions = np.where(extrema_indices == idx)[0][0]  # Find position in extrema_indices array
+
+    # Find left neighbor (previous extrema or curve start)
+    if extrema_positions > 0:
+        left_extrema_idx = extrema_indices[extrema_positions - 1]
+        left_val = curve[left_extrema_idx]
+    else:
+        # If this is the leftmost extrema, use the start of the curve
+        left_extrema_idx = 0
+        left_val = curve[0]
+
+    # Find right neighbor (next extrema or curve end)
+    if extrema_positions < len(extrema_indices) - 1:
+        right_extrema_idx = extrema_indices[extrema_positions + 1]
+        right_val = curve[right_extrema_idx]
+    else:
+        # If this is the rightmost extrema, use the end of the curve
+        right_extrema_idx = curve_length - 1
+        right_val = curve[-1]
+
+    # Calculate y-distance changes
+    # left_distance = abs(val - left_val) / (idx - left_extrema_idx)
+    # right_distance = abs(val - right_val) / (right_extrema_idx - idx)
+    left_distance = abs(val - left_val)
+    right_distance = abs(val - right_val)
+
+    return left_distance < threshold or right_distance < threshold
 
 
 def calculate_y_distance(curve, idx, extrema_indices):
@@ -1159,7 +1208,7 @@ DEFAULT_DECOMP_KWARGS = dict(
         # min_interval=5,
         min_interval=1,
         smooth_method="kernel",
-        gamma=0.01,
+        gamma=0.04,
         subgoal_target=None,
     ),
     embed_no_robot=dict(
