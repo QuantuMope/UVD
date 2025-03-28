@@ -38,7 +38,7 @@ def display_subgoals_grid(subgoals, max_cols=3):
     plt.imshow(grid)
     plt.axis('off')
     plt.tight_layout()
-    plt.show()
+    # plt.show()
 
 
 @click.command()

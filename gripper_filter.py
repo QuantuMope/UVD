@@ -11,7 +11,7 @@ gripper_action[60:150] = 1.0  # Create a sample gripper action
 
 
 # Create a function to detect when gripper position finishes changing
-def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2):
+def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2, invert_state=False):
     """
     Detects when the gripper position stabilizes after changing,
     ensuring a valid opening transition must occur before a valid closing transition
@@ -24,6 +24,9 @@ def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2):
         Number of consecutive samples to check for stability
     threshold : float
         Maximum allowed variation to consider the signal stable
+    invert_state : bool
+        If True, inverts the state definition (open=1, closed=0).
+        If False (default), uses original definition (open=0, closed=1)
 
     Returns:
     --------
@@ -34,22 +37,24 @@ def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2):
     """
     # Calculate the derivative of the signal
     diff = np.abs(np.diff(gripper_signal, prepend=gripper_signal[0]))
-
     # Initialize the output signal
     transition_signal = np.zeros_like(gripper_signal)
     transition_points = []
 
     # Track the gripper state to ensure proper open->close sequence
     # -1 = initial (no transition yet detected)
-    #  0 = closed
-    #  1 = open
+    #  0 = closed if not inverted, open if inverted
+    #  1 = open if not inverted, closed if inverted
     gripper_state = -1
+
+    # Map the logical states to the numerical representation based on invert_state
+    OPEN_STATE = 0 if not invert_state else 1
+    CLOSED_STATE = 1 if not invert_state else 0
 
     # Identify transition completion points (where derivative becomes near-zero after being non-zero)
     for i in range(window_size, len(diff)):
         # Check if current window is stable (all differences below threshold)
         window_stable = all(d < threshold for d in diff[i - window_size + 1:i + 1])
-
         # Check if previous point had significant change
         previous_changing = diff[i - window_size] >= threshold
 
@@ -63,23 +68,23 @@ def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2):
             after_value = np.mean(
                 gripper_signal[transition_index:min(len(gripper_signal), transition_index + window_size)])
 
-            # If signal increased, it's an opening transition
+            # If signal increased, it's an opening transition (or closing if inverted)
             if after_value > before_value:
-                is_opening = True
+                is_opening = not invert_state  # Invert the meaning if needed
             else:
-                is_opening = False
+                is_opening = invert_state  # Invert the meaning if needed
 
             # Apply the state transition logic
             if is_opening:
                 # Opening transitions are valid if we're in initial state or closed state
-                if gripper_state in [-1, 0]:
-                    gripper_state = 1  # Mark as open
+                if gripper_state in [-1, CLOSED_STATE]:
+                    gripper_state = OPEN_STATE  # Mark as open
                     transition_points.append(transition_index)
                     transition_signal[transition_index] = 1.0
             else:
                 # Closing transitions are only valid if we're in open state
-                if gripper_state == 1:
-                    gripper_state = 0  # Mark as closed
+                if gripper_state == OPEN_STATE:
+                    gripper_state = CLOSED_STATE  # Mark as closed
                     transition_points.append(transition_index)
                     transition_signal[transition_index] = 1.0
 

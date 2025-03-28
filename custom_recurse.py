@@ -71,7 +71,7 @@ def main(data_path, subgoal_target):
     kr = KernelRegression(gamma=0.04)
     kr.fit(x.reshape(-1, 1), gripper_actions)
     smooth_gripper_actions = kr.predict(x.reshape(-1, 1))
-    gripper_indices, gripper_signal = detect_gripper_transitions(gripper_actions)
+    gripper_indices, gripper_signal = detect_gripper_transitions(gripper_actions, window_size=5, invert_state=True)
 
     # xyz_position[:, 3] = actions[:, -1] * 0.25
     # xyz_position[:, 3] = actions[:, -1] * 1.0
@@ -149,8 +149,6 @@ def main(data_path, subgoal_target):
 
 
     plt.plot(x, 3*xyz_dist, label="xyz_dist", linewidth=5)
-
-
     plt.plot(x, gripper_actions, label="gripper action", linewidth=5)
     plt.plot(x, gripper_signal, label="gripper signal", linewidth=5)
     plt.plot(x, smooth_gripper_signal, label="smooth gripper signal", linewidth=5)
@@ -164,6 +162,7 @@ def main(data_path, subgoal_target):
     # indices.append(len(xyz_position) - 1)
     # indices = np.array(indices)
 
+    gripper_indices += 2
     indices = list(gripper_indices)
     indices.append(len(xyz_position) - 1)
     indices = np.array(indices)

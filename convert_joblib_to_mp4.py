@@ -1,6 +1,7 @@
 import numpy as np
 import joblib
 import cv2
+import os
 
 
 def save_video_from_arrays(arrays, output_path, fps=30, codec='mp4v'):
@@ -39,28 +40,40 @@ def save_video_from_arrays(arrays, output_path, fps=30, codec='mp4v'):
     print(f"Video saved to {output_path}")
 
 
-for i in range(1, 24):
-    data = joblib.load(f"/home/asjchoi/datasets/openx/droid/episode_{i}.joblib.gz")
-    # data = joblib.load(f"/home/asjchoi/Downloads/droid/episode_{i}.joblib.gz")
+if __name__ == "__main__":
+    # directory = "/home/asjchoi/datasets/openx/droid/"
+    directory = "/home/asjchoi/datasets/openx/bridge/test/"
 
-    frames = []
-    actions = []
-    language = data['steps'][0]['language_instruction']
-    for time_step in data['steps']:
-        # img = time_step['observation']['image_0']
-        img = time_step['observation']['image']
-        actions.append(time_step['action'])
-        frames.append(img)
+    if "droid" in directory:
+        image_key = "image"
+    elif "bridge" in directory:
+        image_key = "image_0"
 
-    # cv2.imshow("img", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-    # cv2.waitKey(0)
+    for fn in os.listdir(directory):
+        data = joblib.load(directory + fn)
 
-    frames = np.array(frames)
-    actions = np.array(actions)
+        frames = []
+        actions = []
+        language = data['steps'][0]['language_instruction']
 
-    np.savez(f"/home/asjchoi/datasets/openx/droid/droid{i}.npz", frames=frames, actions=actions, language=language)
+        for time_step in data['steps']:
+            img = time_step['observation'][image_key]
+            actions.append(time_step['action'])
+            frames.append(img)
 
-    save_video_from_arrays(frames, f"/home/asjchoi/datasets/openx/droid/droid{i}.mp4", fps=5)
+        # cv2.imshow("img", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        # cv2.waitKey(0)
+
+        frames = np.array(frames)
+        actions = np.array(actions)
+
+        prefix = fn.split(".joblib.gz")[0]
+        new_data_name = prefix + ".npz"
+        new_video_name = prefix + ".mp4"
+
+        np.savez(directory + new_data_name, frames=frames, actions=actions, language=language)
+
+        save_video_from_arrays(frames, directory + new_video_name, fps=5)
 
 
 
