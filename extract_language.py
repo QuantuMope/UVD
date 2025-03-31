@@ -11,10 +11,11 @@ def process_file(fn, data_directory):
     try:
         data = joblib.load(os.path.join(data_directory, fn))
         language = data['steps'][0]['language_instruction'].decode('utf-8')
-        return fn, language
+        num_subgoals = len(data['subgoal_indices'])
+        return fn, language, num_subgoals
     except Exception as e:
         print(f"Error processing {fn}: {e}")
-        return fn, None
+        return fn, None, None
 
 
 def process_directory(data_directory, json_file_name, num_workers=None):
@@ -40,7 +41,7 @@ def process_directory(data_directory, json_file_name, num_workers=None):
     pool.join()
 
     # Filter out None results and convert to dictionary
-    language_data = {fn: lang for fn, lang in results if lang is not None}
+    language_data = {fn: (lang, num_subgoals) for fn, lang, num_subgoals in results if lang is not None}
 
     # Save results to JSON file
     with open(json_file_name, "w") as f:
