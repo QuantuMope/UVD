@@ -167,3 +167,5 @@ cython_debug/
 .allenact_last_start_time_string
 *.lock
 *wandb
+
+*venv
