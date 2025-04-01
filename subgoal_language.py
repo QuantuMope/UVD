@@ -1,5 +1,4 @@
 from vllm import LLM, SamplingParams
-import json
 from tqdm import tqdm
 import time
 
