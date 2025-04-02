@@ -6,7 +6,6 @@ import time
 # llm = LLM(
 #     model="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
 #     dtype="bfloat16",
-#     tensor_parallel_size=1,
 #     gpu_memory_utilization=0.7
 # )
 llm = LLM(
