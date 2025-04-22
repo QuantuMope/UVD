@@ -71,18 +71,18 @@ def detect_gripper_transitions(gripper_signal, window_size=10, threshold=1e-2):
                 if gripper_state == CLOSED_STATE:
 
                     gripper_state = OPEN_STATE  # Mark as open
-                    transition_points.append(transition_index)
-                    transition_signal[transition_index] = 1.0
+                    # transition_points.append(transition_index)
+                    # transition_signal[transition_index] = 1.0
 
                     # # Find when the opening actually started
-                    # opening_start = transition_index
-                    # for j in range(transition_index - 1, 0, -1):
-                    #     if diff[j] < threshold and diff[j + 1] >= threshold:
-                    #         opening_start = j + 1
-                    #         break
-                    # add_diff = 3
-                    # transition_points.append(opening_start+add_diff)
-                    # transition_signal[opening_start+add_diff] = 1.0
+                    opening_start = transition_index
+                    for j in range(transition_index - 1, 0, -1):
+                        if diff[j] < threshold and diff[j + 1] >= threshold:
+                            opening_start = j + 1
+                            break
+                    add_diff = 1
+                    transition_points.append(opening_start+add_diff)
+                    transition_signal[opening_start+add_diff] = 1.0
             else:
                 # Closing transitions are only valid if we're in open state
                 if gripper_state == OPEN_STATE:
